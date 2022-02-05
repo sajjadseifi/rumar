@@ -697,7 +697,7 @@ char* pmsg_tostring(PMsg pm,int level)
     list_T* list = list_init(3);
     jlist_add(list,"PMSG","PMsg",0);
     jlist_add(list,"port",peer_tostring(pm.peer,level+1),2);
-    jlist_add(list,"message",pm.message,1);
+    jlist_add(list,"message",pm.message,0);
 
     return jlist_tostring(list,level);
 }
@@ -757,12 +757,13 @@ int jlist_rm(list_T* list,char *key)
 }
 void jlist_sort_by_key(list_T* list)
 {
+    Json *a,*b;
     for (size_t i = 1; i < list->size; i++)
     {
-        Json *a =(Json *) list->items[i];
+        a = (Json *) list->items[i];
         for (int j = i + 1; j < list->size; j++)
         {
-            Json *b =(Json *) list->items[j];
+            b = (Json *) list->items[j];
             if(strcmp(a->key, b->key) > 0)
             {
                 void* tmp = list->items[i];
@@ -805,9 +806,9 @@ char* jlist_tostring(list_T* list,int level)
         strcat(indside,":");
 
         if(j->type == 0)
-            strcat(indside,red(j->value));  
-        else if(j->type == 1)
             strcat(indside,str_dqute(j->value));  
+        else if(j->type == 1)
+            strcat(indside,red(j->value));  
         else
             strcat(indside,j->value);  
     }
@@ -818,7 +819,7 @@ char* jlist_tostring(list_T* list,int level)
 
     sprintf(buffer,
         "%s %s%s\n%s%s",
-        purple(root->value),
+        blue(root->value),
         purple("{"),
         indside,
         tab0,
