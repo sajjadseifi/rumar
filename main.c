@@ -149,7 +149,7 @@ int main(){
 /* Modules */
 char *itos(int i)
 {
-    char *s = malloc(sizeof(char) * 20);
+    char *s = malloc(sizeof(char) * 40);
     
     sprintf(s,"%d",i);
 
@@ -481,9 +481,9 @@ void  pmsg_test()
 {
     pmsg_add(pmsg_init(&cons[0],"sallam man sajjad hastam"));
     pmsg_add(pmsg_init(&cons[1],"sallam man matt hastam"));
-    pmsg_add(pmsg_init(&cons[1],"kir bkhor"));
-    pmsg_add(pmsg_init(&cons[2],"kion"));
-    pmsg_add(pmsg_init(&cons[0],"moadab bashid(:"));
+    pmsg_add(pmsg_init(&cons[1],"haleton chetore"));
+    pmsg_add(pmsg_init(&cons[2],"khobi da to chetori"));
+    pmsg_add(pmsg_init(&cons[0],"manam khobam"));
     pmsg_print_all();    
 }
 /* net peer */
@@ -779,19 +779,11 @@ char* jlist_tostring(list_T* list,int level)
 }
 char *conc_color(char *code,char *str)
 {
-    int ssz =(
-        strlen(code) + 
-        strlen(str) + 
-        strlen("\033[0m") +
-        1
-    );
-
+    int ssz = strlen(code) + strlen(str) + strlen("\033[0m") + 1;
     char *buf = malloc(ssz * sizeof(char));
     
-    strcat(buf,code);
-    strcat(buf,str);
-    strcat(buf,"\033[0m");
-    
+    sprintf(buf,"%s%s%s",code,str,"\033[0m");
+
     return buf;
 }
 char * red (char *str)
