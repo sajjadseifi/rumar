@@ -7,8 +7,12 @@
 #include <arpa/inet.h>
 #include <pthread.h>
 #include <stdbool.h>
+//commands
 #define PEER "peer"
 #define RUMAR "rumar"
+#define CLEAR "clear"
+#define CONS "cons"
+#define MESS "mess"
 #define MAX_CON 1000
 #define MAX_MSG 2048
 #define BUFFER 2048
@@ -61,9 +65,10 @@ char *itos(int i);
 void  print_str(char *str);
 void  println_str(char *str);
 char *level_tap(int level);
-
+char *clone_str(char *buffer);
 //net peer
 NetP *netp_init(const char *ip,uint16_t port);
+bool  netp_cmp(NetP *p1,NetP *p2);
 NetP *netp_on_addr(char *addr);
 char *netp_to_addr(NetP *netp);
 char *netp_tostring(NetP *netp,int level);
@@ -106,16 +111,22 @@ char *green(char *str);
 char *purple(char *str);
 char *cyan(char *str);
 char *white(char *str);
+char *str_dqute(char *str);
+char *str_qute(char *str);
+
 /* Application */
 void listen_app();
 void downed_app();
 App *init_app(const char *name,const char *ip,int port);
-void init_root();
+void init_root(int argc,char *argv[]);
 void sending(NetP *netp,const char *message);
 void receiving(int server_fd);
 void *receive_thread(void *server_fd);
 //cmd
 bool  command();
+void  command_start();
+char *command_gen(const char *cmd,const char *data);
+char *command_not_found(char *cmd);
 void  send_handler(char * cmd,char *data);
 void  recive_handler(char * buffer);
 void  send_to_all(char *msg);
@@ -127,11 +138,12 @@ void  send_all_msg(NetP *netp);
  * @return ** int 
  */
 
-int main(){
+int main(int argc,char *argv[]){
+
     pthread_mutex_init(&con_lock, NULL);
     pthread_mutex_init(&msg_lock, NULL);
 
-    init_root();
+    init_root(argc,argv);
     listen_app();
     pthread_create(
         &app->tid, 
@@ -168,10 +180,36 @@ char *level_tap(int level)
     char *tab = (char *)malloc(sizeof(char) * level + 1);
     strcat(tab,"");
     
-    while (level-- > 0) strcat(tab,"\t");
+    while (level-- > 0) strcat(tab,"  ");
 
     return tab;
 }
+char *clone_str(char * buffer)
+{
+    char *clone = malloc((strlen(buffer)+1) * sizeof(char));
+    
+    sprintf(clone,"%s%s",buffer,"\0");
+    
+    return clone;
+}
+char *get_line()
+{
+    char *string; // character array pointer
+    size_t size = 1024; // initial size of char array
+    string = (char*) malloc (size);//dynamic memory allocation of character array
+    if(string == NULL)
+    {
+        printf("unable to allocate memory\n");
+        exit(1);
+    }
+    char **string_pointer = &string; // double pointer to char array
+    size_t characters = getline(string_pointer,&size,stdin);
+    
+    string[strlen(string)-1] = 0;
+
+    return string;
+}
+
 /* Application */
 App *init_app(const char *name,const char *ip,int port)
 {
@@ -180,21 +218,31 @@ App *init_app(const char *name,const char *ip,int port)
 
     return app;
 }
-void init_root()
+void init_root(int argc,char *argv[])
 {
-    int port=8585;
-    char ip[20]="0.0.0.0",name[20]="sajjad";
-
-    // printf("name : ");
-    // scanf("%s", name);
-
-    // printf("ip : ");
-    // scanf("%s", ip);
+    char *port="8796",*ipaddr="0.0.0.0",*name="Peer";
     
-    printf("port : ");
-    scanf("%d", &port);
+    char *dkey,*dval; 
+    for (int i = 1; i < argc; i+=2)
+    {
+        dkey = clone_str(argv[i]);
+        dval = clone_str(argv[i+1]);
+        if(!strcmp(dkey,"-i")){ //ip
+            ipaddr = dval;
+        }
+        else if(!strcmp(argv[i],"-p")){ //port
+            port = dval;
+        }
+        else if(!strcmp(argv[i],"-n")){ // name
+            name = dval;
+        }
+        else {
+            command_not_found(dkey);
+            exit(1);
+        }
+    }
 
-    app = init_app(name,ip,port);
+    app = init_app(name,ipaddr,atoi(port));
 }
 void listen_app()
 {
@@ -233,43 +281,25 @@ void downed_app()
     close(app->server_fd);
 }
 /* Command */ 
-char *get_line() {
-    char * line = malloc(100), * linep = line;
-    size_t lenmax = 100, len = lenmax;
-    int c;
-
-    if(line == NULL)
-        return NULL;
-
-    for(;;) {
-        c = fgetc(stdin);
-        if(c == EOF)
-            break;
-
-        if(--len == 0) {
-            len = lenmax;
-            char * linen = realloc(linep, lenmax *= 2);
-
-            if(linen == NULL) {
-                free(linep);
-                return NULL;
-            }
-            line = linen + (line - linep);
-            linep = linen;
-        }
-
-        if((*line++ = c) == '\n')
-            break;
+void command_start(){
+    if(!strcmp(app->root->name,"")){
+        printf("%s  \n",cyan("command$"));
     }
-    *line = '\0';
-    return linep;
+    else {
+        printf("%s%s%s%s%s \n",
+            red("-> "),
+            blue("["),
+            cyan(netp_to_addr(app->root->netp)),
+            blue("]"),
+            cyan("$")
+        );
+    }
 }
 bool command()
 {
-    printf("%s",cyan("command : "));
+    command_start();
     char *buf = get_line();
-    
-    if(!strcmp(buf,"") || !strcmp(buf,"\0")) 
+    if(!strcmp(buf,"exit")) 
         return false;
     
     char *cmd = strtok (buf," ");
@@ -278,106 +308,117 @@ bool command()
 
     return true;
 }
+char *command_gen(const char *cmd,const char *data)
+{
+    char *buffer = malloc((strlen(cmd) + strlen(data) + 1) * sizeof(char) + 1);
+
+    sprintf(buffer,"%s %s",cmd,data);
+
+    return buffer;
+}
+char *command_not_found(char *cmd)
+{
+    printf("%s : %s\n",purple(cmd),red("command not found"));   
+}   
 void send_handler(char * cmd,char *data)
 {
-    char *result = malloc(BUFFER * sizeof(char));
-
     if(!strcmp(cmd,PEER)){
-        sprintf(result,"%s %s:%d",
-            PEER, 
-            app->root->netp->ip,
-            app->root->netp->port
-        );
-        char *ip = strtok (data,":");
-        char *port = strtok (NULL,"");
-        sending(netp_init(ip,atoi(port)),result);
+        NetP *tar =  netp_on_addr(data);
+        if(netp_cmp(app->root->netp,tar)) 
+        {
+            printf("%s : you can not connect with yourself\n",red("warning"));
+            return;
+        }
+        char *result = command_gen(PEER,netp_to_addr(app->root->netp));
+        sending(tar,result);
     }
     else if (!strcmp(cmd,RUMAR)){
-        sprintf(result,"%s %s",RUMAR, data);
+        char *result = command_gen(RUMAR, data);
         send_to_all(result);
     }
+    else if (!strcmp(cmd,CLEAR)){
+        system("clear");
+    }
+    else if (!strcmp(cmd,CONS)){
+        peer_print_all();
+    }
+    else if (!strcmp(cmd,MESS)){
+        pmsg_print_all();
+    }
     else{
-        printf("%s: command not found\n",cmd);   
+        command_not_found(cmd);
         return;
     }
 }
-void send_all_msg(NetP *netp)
+void recive_handler(char *buffer)
 {
-    char *buf = malloc(strlen(RUMAR) + BUFFER);
-    //lock
-    pthread_mutex_lock(&msg_lock);
-
-    for (int i = 0; i < cur_msg; i++)
-    {
-        strcpy(buf,RUMAR);
-        strcat(buf,msg_list[i].message);
-        sending(netp,buf);
-    }
-    
-    pthread_mutex_unlock(&msg_lock);
-}
-void recive_handler(char * buffer)
-{
-    char cp[BUFFER * 2];
-    strcpy(cp,buffer);
-
+    printf("\n%s %s\n",yellow("receved"),buffer);
+    char *cp = clone_str(buffer);
     char *cmd = strtok (cp," ");    
     char *data = strtok (NULL,"");
 
     if(!strcmp(cmd,PEER)){
         NetP *clinet = netp_on_addr(data);
-
         pthread_mutex_lock(&con_lock);
-     
-        if(peer_exist(clinet)) {
-            printf("%s %s %s",
-                blue("ip address"),
-                red(data),
-                "previusly connected!"
-            );
-            return;
-        }
-        peer_add_con(peer_init("",clinet));
-        peer_print_all();
-        send_all_msg(clinet);
 
-        pthread_mutex_unlock(&con_lock);
+        if(peer_exist(clinet)) {
+            printf("%s %s %s\n",
+                blue("ip address"),
+                str_dqute(red(data)),
+                blue("previusly connected!")
+            );
+            pthread_mutex_unlock(&con_lock);
+        }
+        else {
+            peer_add_con(peer_init("",clinet));
+            peer_print_all();
+            pthread_mutex_unlock(&con_lock);
+            pthread_mutex_lock(&msg_lock);
+            send_all_msg(clinet);
+            pthread_mutex_unlock(&msg_lock);
+        }
     }
     else if (!strcmp(cmd,RUMAR)){
         pthread_mutex_lock(&msg_lock);
-     
         if(pmsg_exist(data)) 
         {
-            printf("%s %s %s",
+            printf("%s %s %s\n",
                 blue("message"),
-                red(data),
-                "exist!"
+                str_dqute(data),
+                blue("exist!")
             );
-            return;
+            pthread_mutex_unlock(&msg_lock);
         }
-        
-        pmsg_add(pmsg_init(peer_init("",netp_init("",0)),data));
-        pmsg_print_all();
-        send_to_all(buffer);   
-     
-        pthread_mutex_unlock(&msg_lock);
+        else {
+            pmsg_add(pmsg_init(peer_init("",netp_init("",0)),data));
+            pmsg_print_all();
+            pthread_mutex_unlock(&msg_lock);
+            pthread_mutex_lock(&con_lock);
+            send_to_all(buffer);               
+            pthread_mutex_unlock(&con_lock);
+        }
     }
     else{
         printf("%s: command not found\n",cmd);   
         return;
     }
-
+    command_start();
+}
+void send_all_msg(NetP *netp)
+{
+    char *buf;
+    for (int i = 0; i < cur_msg; i++)
+    {
+        buf = command_gen(RUMAR,msg_list[i].message);
+        sending(netp,buf);
+    }
 }
 void send_to_all(char *msg)
 {
-    pthread_mutex_lock(&msg_lock);
-
     for (int i = 0; i < cur_con ; i++)
     {
         sending(cons[i].netp,msg);
     }
-
-    pthread_mutex_unlock(&msg_lock);
 }
 void sending(NetP *netp,const char *buffer)
 {
@@ -401,7 +442,7 @@ void sending(NetP *netp,const char *buffer)
     }
 
     send(sock, buffer, BUFFER * 2 , 0);
-    printf("\n%s %s\n",green("sended"),buffer);
+    printf("%s %s\n",green("sended"),buffer);
     close(sock);
 }
 //Calling receiving every 2 seconds
@@ -458,7 +499,6 @@ void receiving(int server_fd)
                 else
                 {
                     valread = recv(i, buffer, sizeof(buffer), 0);
-                    printf("\n%s %s\n",yellow("receved"),buffer);
                     recive_handler(buffer);
                     FD_CLR(i, &current_sockets);
                 }
@@ -496,6 +536,10 @@ NetP *netp_init(const char *ip,uint16_t port)
     
     return np;
 }
+bool  netp_cmp(NetP *n1,NetP *n2)
+{
+    return n1->port == n2->port && !strcmp(n1->ip,n2->ip); 
+}
 NetP *netp_on_addr(char *addr)
 {
     char *cp = malloc(strlen(addr) * sizeof(char) + 1);
@@ -508,11 +552,9 @@ NetP *netp_on_addr(char *addr)
 }
 char *netp_to_addr(NetP *netp)
 {
-    char *buf = malloc(strlen(netp->ip) + sizeof(char) * 5 + 1);
+    char *buf = malloc((strlen(netp->ip)+6) * sizeof(char)  + 1);
     
-    strcat(buf,netp->ip);
-    strcat(buf,":");
-    strcat(buf,itos(netp->port));
+    sprintf(buf,"%s:%s",netp->ip,itos(netp->port));
 
     return buf;
 }
@@ -558,12 +600,11 @@ int peer_add_con(Peer *p)
 {
     int ind;
     if(MAX_CON <= cur_con){
-        printf("full connection : can not add new");
+        printf("full connection : can not add new\n");
         return -1;
     }
     if((ind=peer_con_index(p)) != -1)
     {
-        printf("connection exsit");
         return ind;
     }
     peer_cpy(&cons[cur_con],p);
@@ -592,11 +633,9 @@ Peer *peer_rm_con_index(int index)
 }
 bool peer_exist(NetP *netp)
 {
-    for(int i;i< cur_con;i++)
-        if(
-            netp->port == cons[i].netp->port 
-            && !strcmp(cons[i].netp->ip,netp->ip)
-        )
+    for(int i = 0;i< cur_con;i++)
+        if(netp->port == cons[i].netp->port  && 
+            !strcmp(cons[i].netp->ip,netp->ip))
             return true;
     
     return false;
@@ -635,18 +674,10 @@ int pmsg_add(PMsg *pm)
 { 
     int pind;
     if(MAX_MSG <= cur_msg){
-        printf("full message : can not add new message");
+        printf("full message : can not add new message\n");
         return -1;
     }
-    //find peer index
-    for(pind = 0;pind < cur_con;pind++)
-        if(peer_cmp(cons[pind],*(pm->peer))) 
-            break;
-    //check if out of bound index
-    if(pind == cur_con){
-        printf("peer with ip&port not exsit");
-        return -1;
-    }
+
     pmsg_cpy(&msg_list[cur_msg],pm);
 
     cur_msg++;
@@ -655,8 +686,8 @@ int pmsg_add(PMsg *pm)
 }
 bool pmsg_exist(char *msg)
 {
-    for(int i;i<cur_msg;i++)
-        if(strcmp(msg_list[i].message,msg))
+    for(int i = 0; i < cur_msg;i++)
+        if(!strcmp(msg_list[i].message,msg))
             return true;
     
     return false;
@@ -665,8 +696,8 @@ char* pmsg_tostring(PMsg pm,int level)
 {   
     list_T* list = list_init(3);
     jlist_add(list,"PMSG","PMsg",0);
-    jlist_add(list,"message",pm.message,0);
     jlist_add(list,"port",peer_tostring(pm.peer,level+1),2);
+    jlist_add(list,"message",pm.message,1);
 
     return jlist_tostring(list,level);
 }
@@ -724,6 +755,23 @@ int jlist_rm(list_T* list,char *key)
 
     return ind;
 }
+void jlist_sort_by_key(list_T* list)
+{
+    for (size_t i = 1; i < list->size; i++)
+    {
+        Json *a =(Json *) list->items[i];
+        for (int j = i + 1; j < list->size; j++)
+        {
+            Json *b =(Json *) list->items[j];
+            if(strcmp(a->key, b->key) > 0)
+            {
+                void* tmp = list->items[i];
+                list->items[i] = list->items[j];
+                list->items[j] = tmp;
+            }
+        }
+    }
+}
 char* jlist_tostring(list_T* list,int level)
 {
     int sz = list->size;
@@ -735,34 +783,36 @@ char* jlist_tostring(list_T* list,int level)
     char *tab0 = level_tap(level);
     char *tab1 = level_tap(level+1);
     
+    jlist_sort_by_key(list);
+    
     char *indside = malloc(1); 
     for (size_t i = 1; i < sz; i++)
     {
         Json *j =(Json *) list->items[i];
         int ssz = (
             strlen(indside) +
-            strlen(j->key) + 
-            strlen(j->value) +
+            strlen(green(j->key)) + 
             2 * strlen(yellow("\"")) +
-            strlen(cyan(j->value))
+            2 * strlen(green("\"")) +
+            strlen(red(j->value))
         );
 
         indside = realloc(indside,ssz * sizeof(char) + 40);
 
         strcat(indside,"\n");
         strcat(indside,tab1);
-        strcat(indside,j->key);
-        strcat(indside," : ");
+        sprintf(indside,"%s%s%s%s",indside,green("\""),green(j->key),green("\""));
+        strcat(indside,":");
+
         if(j->type == 0)
-            strcat(indside,yellow("\""));
-           
-        sprintf(indside,"%s%s",
-            indside,j->type== 1 ?red(j->value):j->value);
-        if(j->type == 0)
-            strcat(indside,yellow("\""));  
+            strcat(indside,red(j->value));  
+        else if(j->type == 1)
+            strcat(indside,str_dqute(j->value));  
+        else
+            strcat(indside,j->value);  
     }
     
-    long s_sz = strlen(indside) + strlen(root->value) + 10;
+    long s_sz = strlen(indside) + strlen(root->value) + 20;
     char *buffer = malloc(s_sz * sizeof(char)); 
 
 
@@ -821,3 +871,21 @@ char *white(char *str)
 {
   return conc_color("\033[1;37m",str);
 }
+char *str_dqute(char *str)
+{
+    char *buf = malloc((strlen(yellow(str)) + strlen(yellow("\"")) * 2) +1);
+
+    sprintf(buf,"%s%s%s",yellow("\""),yellow(str),yellow("\""));
+    
+    return buf;
+}
+char *str_qute(char *str)
+{
+
+    char *buf = malloc((strlen(yellow(str)) + strlen(yellow("\'")) * 2) +1);
+
+    sprintf(buf,"%s%s%s",yellow("\'"),yellow(str),yellow("\'"));
+    
+    return buf;
+}
+
